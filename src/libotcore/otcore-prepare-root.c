@@ -537,11 +537,12 @@ otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder, const cha
       g_autofree char *deploy_path = g_build_filename (mount_target, "ostree", "deploy", NULL);
       g_autoptr (GDir) deploy_dir = g_dir_open (deploy_path, 0, NULL);
       const char *osname = NULL;
-      if (deploy_dir)
-        osname = g_dir_read_name (deploy_dir);
+      if (!deploy_dir)
+        return glnx_throw (error, "Failed to open deploy directory %s", deploy_path);
 
+      osname = g_dir_read_name (deploy_dir);
       if (!osname)
-        return glnx_throw_errno_prefix (error, "Failed to find stateroot in %s", deploy_path);
+        return glnx_throw (error, "No stateroot found in %s (empty directory)", deploy_path);
 
       // The overlay directory is at the sysroot level (not in the temp mount)
       // Use ../ to go from /sysroot.tmp to /sysroot
