@@ -135,6 +135,10 @@ gboolean otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder,
 #define OTCORE_PREPARE_ROOT_KEYPATH_KEY "keypath"
 #define OTCORE_PREPARE_ROOT_TRANSIENT_KEY "transient"
 #define OTCORE_PREPARE_ROOT_TRANSIENT_RO_KEY "transient-ro"
+#define OTCORE_PREPARE_ROOT_LEGACY_MERGE_KEY "legacy-merge"
+
+#define OTCORE_ETC_KEY "etc"
+#define OTCORE_DEPLOYMENT_ETC_OVERLAY_DIR "etc-overlay"
 
 // For use with systemd soft reboots
 #define OTCORE_RUN_NEXTROOT "/run/nextroot"
@@ -163,3 +167,4 @@ gboolean otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder,
 #define OTCORE_RUN_BOOTED_KEY_BACKING_ROOTDEVINO "backing-root-device-inode"
 
 #define OTCORE_RUN_BOOTED_KEY_TRANSIENT_ETC "transient-etc"
+#define OTCORE_RUN_BOOTED_KEY_PERSISTENT_ETC "persistent-etc"

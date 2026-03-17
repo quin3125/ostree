@@ -3490,6 +3490,26 @@ sysroot_finalize_deployment (OstreeSysroot *self, OstreeDeployment *deployment,
   if (!glnx_opendirat (self->sysroot_fd, deployment_path, TRUE, &deployment_dfd, error))
     return FALSE;
 
+  gboolean skip_etc_merge = FALSE;
+  {
+    g_autoptr (GKeyFile) config = otcore_load_config (deployment_dfd, PREPARE_ROOT_CONFIG_PATH, error);
+    if (!config)
+      return FALSE;
+
+    gboolean etc_transient = FALSE;
+    if (!ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
+                                             FALSE, &etc_transient, error))
+      return glnx_prefix_error (error, "Failed to parse etc.transient value");
+
+    gboolean etc_legacy_merge = FALSE;
+    if (!ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_LEGACY_MERGE_KEY,
+                                              FALSE, &etc_legacy_merge, error))
+      return glnx_prefix_error (error, "Failed to parse etc.legacy-merge value");
+
+    if (!etc_transient && !etc_legacy_merge)
+      skip_etc_merge = TRUE;
+  }
+
   OstreeBootconfigParser *bootconfig = ostree_deployment_get_bootconfig (deployment);
 
   /* If the kargs weren't set yet, then just pick it up from the merge deployment. In the
@@ -3506,7 +3526,7 @@ sysroot_finalize_deployment (OstreeSysroot *self, OstreeDeployment *deployment,
         }
     }
 
-  if (merge_deployment)
+  if (merge_deployment && !skip_etc_merge)
     {
       /* And do the /etc merge */
       if (!merge_configuration_from (self, merge_deployment, deployment, deployment_dfd,

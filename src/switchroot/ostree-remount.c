@@ -171,6 +171,10 @@ main (int argc, char *argv[])
   g_variant_dict_lookup (ostree_run_metadata, OTCORE_RUN_BOOTED_KEY_TRANSIENT_ETC, "&s",
                          &transient_etc);
 
+  const char *persistent_etc = NULL;
+  g_variant_dict_lookup (ostree_run_metadata, OTCORE_RUN_BOOTED_KEY_PERSISTENT_ETC, "&s",
+                         &persistent_etc);
+
   if (transient_etc)
     {
       /* If the initramfs created any files in /etc (directly or via overlay copy-up) they
@@ -213,6 +217,38 @@ main (int argc, char *argv[])
         err (EXIT_FAILURE, "Failed to join initial namespace");
     }
 
+  if (persistent_etc)
+    {
+      /* Similar to transient_etc, but for persistent overlay.
+       * The overlay upper directory was created in the initramfs and may contain
+       * files that need SELinux relabeling.
+       */
+      glnx_autofd int initial_ns_fd = -1;
+      if (g_file_test ("/run/machine-id", G_FILE_TEST_EXISTS)
+          && g_file_test ("/etc/machine-id", G_FILE_TEST_EXISTS))
+        {
+          initial_ns_fd = open ("/proc/self/ns/mnt", O_RDONLY | O_NOCTTY | O_CLOEXEC);
+          if (initial_ns_fd < 0)
+            err (EXIT_FAILURE, "Failed to open initial namespace");
+
+          if (unshare (CLONE_NEWNS) < 0)
+            err (EXIT_FAILURE, "Failed to unshare initial namespace");
+
+          /* Ensure unmount is not propagated */
+          if (mount ("none", "/etc", NULL, MS_REC | MS_PRIVATE, NULL) < 0)
+            err (EXIT_FAILURE, "warning: While remounting /etc MS_PRIVATE");
+
+          if (umount2 ("/etc/machine-id", MNT_DETACH) < 0)
+            err (EXIT_FAILURE, "Failed to unmount machine-id");
+        }
+
+      g_autofree char *upper = g_build_filename (persistent_etc, "upper", NULL);
+      relabel_dir_for_upper (upper, "/etc", TRUE);
+
+      if (initial_ns_fd != -1 && setns (initial_ns_fd, CLONE_NEWNS) < 0)
+        err (EXIT_FAILURE, "Failed to join initial namespace");
+    }
+
   gboolean root_is_composefs = FALSE;
   g_variant_dict_lookup (ostree_run_metadata, OTCORE_RUN_BOOTED_KEY_COMPOSEFS, "b",
                          &root_is_composefs);
@@ -234,9 +270,10 @@ main (int argc, char *argv[])
   do_remount ("/sysroot", !sysroot_configured_readonly);
 
   /* And also make sure to make /etc rw again. We make this conditional on
-   * sysroot_configured_readonly && !transient_etc because only in that case is it a
-   * bind-mount. */
-  if (sysroot_configured_readonly && !transient_etc)
+   * sysroot_configured_readonly && !transient_etc && !persistent_etc because only in that
+   * case is it a bind-mount. For overlayfs (transient or persistent), /etc is already
+   * writable via the overlay upper layer. */
+  if (sysroot_configured_readonly && !transient_etc && !persistent_etc)
     do_remount ("/etc", true);
 
   /* If /var was created as as an OSTree default bind mount (instead of being a separate

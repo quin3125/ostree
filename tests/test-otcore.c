@@ -129,6 +129,76 @@ test_prepare_root_config (void)
   }
 }
 
+static void
+test_prepare_root_etc_config (void)
+{
+  g_autoptr (GError) error = NULL;
+  g_auto (GLnxTmpDir) tmpdir = {
+    0,
+  };
+  g_assert (glnx_mkdtempat (AT_FDCWD, "/tmp/test-XXXXXX", 0777, &tmpdir, &error));
+  g_assert_no_error (error);
+
+  g_assert (glnx_shutil_mkdir_p_at (tmpdir.fd, "usr/lib/ostree", 0755, NULL, NULL));
+  g_assert (glnx_file_replace_contents_at (tmpdir.fd, "usr/lib/ostree/prepare-root.conf",
+                                           (guint8 *)"[etc]\ntransient=false", -1, 0, NULL, NULL));
+
+  {
+    g_autoptr (GKeyFile) config = otcore_load_config (tmpdir.fd, PREPARE_ROOT_CONFIG_PATH, &error);
+    g_assert_no_error (error);
+    g_assert (config);
+
+    gboolean transient = TRUE;
+    g_assert (ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
+                                                  TRUE, &transient, &error));
+    g_assert_no_error (error);
+    g_assert_cmpint (transient, ==, FALSE);
+
+    gboolean legacy_merge = TRUE;
+    g_assert (ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_LEGACY_MERGE_KEY,
+                                                   FALSE, &legacy_merge, &error));
+    g_assert_no_error (error);
+    g_assert_cmpint (legacy_merge, ==, FALSE);
+  }
+
+  g_assert (glnx_file_replace_contents_at (tmpdir.fd, "usr/lib/ostree/prepare-root.conf",
+                                           (guint8 *)"[etc]\ntransient=true", -1, 0, NULL, NULL));
+
+  {
+    g_autoptr (GKeyFile) config = otcore_load_config (tmpdir.fd, PREPARE_ROOT_CONFIG_PATH, &error);
+    g_assert_no_error (error);
+    g_assert (config);
+
+    gboolean transient = FALSE;
+    g_assert (ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
+                                                  FALSE, &transient, &error));
+    g_assert_no_error (error);
+    g_assert_cmpint (transient, ==, TRUE);
+  }
+
+  g_assert (glnx_file_replace_contents_at (tmpdir.fd, "usr/lib/ostree/prepare-root.conf",
+                                           (guint8 *)"[etc]\ntransient=false\nlegacy-merge=true", -1,
+                                           0, NULL, NULL));
+
+  {
+    g_autoptr (GKeyFile) config = otcore_load_config (tmpdir.fd, PREPARE_ROOT_CONFIG_PATH, &error);
+    g_assert_no_error (error);
+    g_assert (config);
+
+    gboolean transient = TRUE;
+    g_assert (ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
+                                                  TRUE, &transient, &error));
+    g_assert_no_error (error);
+    g_assert_cmpint (transient, ==, FALSE);
+
+    gboolean legacy_merge = FALSE;
+    g_assert (ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_LEGACY_MERGE_KEY,
+                                                   TRUE, &legacy_merge, &error));
+    g_assert_no_error (error);
+    g_assert_cmpint (legacy_merge, ==, TRUE);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -137,5 +207,6 @@ main (int argc, char **argv)
   g_test_add_func ("/ed25519", test_ed25519);
   g_test_add_func ("/prepare-root-cmdline", test_prepare_root_cmdline);
   g_test_add_func ("/prepare-root-config", test_prepare_root_config);
+  g_test_add_func ("/prepare-root-etc-config", test_prepare_root_etc_config);
   return g_test_run ();
 }

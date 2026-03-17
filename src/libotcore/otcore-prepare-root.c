@@ -481,9 +481,14 @@ otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder, const cha
                   GError **error)
 {
   gboolean etc_transient = FALSE;
-  if (!ot_keyfile_get_boolean_with_default (config, ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
+  if (!ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_TRANSIENT_KEY,
                                             FALSE, &etc_transient, error))
     return glnx_prefix_error (error, "Failed to parse etc.transient value");
+
+  gboolean etc_legacy_merge = FALSE;
+  if (!ot_keyfile_get_boolean_with_default (config, OTCORE_ETC_KEY, OTCORE_PREPARE_ROOT_LEGACY_MERGE_KEY,
+                                            FALSE, &etc_legacy_merge, error))
+    return glnx_prefix_error (error, "Failed to parse etc.legacy-merge value");
 
   g_autofree char *target_etc = g_build_filename (mount_target, "etc", NULL);
   if (etc_transient)
@@ -505,10 +510,10 @@ otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder, const cha
       g_autofree char *workdir = g_build_filename (ovldir, "work", NULL);
 
       struct
-      {
-        const char *path;
-        int mode;
-      } subdirs[] = { { upperdir, 0755 }, { workdir, 0755 } };
+        {
+          const char *path;
+          int mode;
+        } subdirs[] = { { upperdir, 0755 }, { workdir, 0755 } };
       for (int i = 0; i < G_N_ELEMENTS (subdirs); i++)
         {
           if (mkdirat (AT_FDCWD, subdirs[i].path, subdirs[i].mode) < 0)
@@ -519,6 +524,52 @@ otcore_mount_etc (GKeyFile *config, GVariantBuilder *metadata_builder, const cha
           = g_strdup_printf ("lowerdir=%s,upperdir=%s,workdir=%s", lowerdir, upperdir, workdir);
       if (mount ("overlay", target_etc, "overlay", MS_SILENT, ovl_options) < 0)
         return glnx_throw_errno_prefix (error, "failed to mount transient etc overlayfs");
+    }
+  else if (!etc_legacy_merge)
+    {
+      // Persistent overlay mode: use overlayfs with a persistent upper directory
+      // that survives reboots. This replaces the 3-way merge behavior.
+
+      // Derive the stateroot path from mount_target.
+      // mount_target is typically /sysroot.tmp, and the deployment is at:
+      // /sysroot.tmp/ostree/deploy/<osname>/deploy/<csum>.<serial>
+      // We want the overlay at: /sysroot/ostree/deploy/<osname>/etc-overlay
+      g_autofree char *deploy_path = g_build_filename (mount_target, "ostree", "deploy", NULL);
+      g_autoptr (GDir) deploy_dir = g_dir_open (deploy_path, 0, NULL);
+      const char *osname = NULL;
+      if (deploy_dir)
+        osname = g_dir_read_name (deploy_dir);
+
+      if (!osname)
+        return glnx_throw_errno_prefix (error, "Failed to find stateroot in %s", deploy_path);
+
+      // The overlay directory is at the sysroot level (not in the temp mount)
+      // Use ../ to go from /sysroot.tmp to /sysroot
+      g_autofree char *ovldir = g_strdup_printf ("%s/../ostree/deploy/%s/%s", mount_target,
+                                                  osname, OTCORE_DEPLOYMENT_ETC_OVERLAY_DIR);
+
+      g_variant_builder_add (metadata_builder, "{sv}", OTCORE_RUN_BOOTED_KEY_PERSISTENT_ETC,
+                             g_variant_new_string (ovldir));
+
+      g_autofree char *lowerdir = g_build_filename (mount_target, "usr/etc", NULL);
+      g_autofree char *upperdir = g_build_filename (ovldir, "upper", NULL);
+      g_autofree char *workdir = g_build_filename (ovldir, "work", NULL);
+
+      struct
+        {
+          const char *path;
+          int mode;
+        } subdirs[] = { { upperdir, 0755 }, { workdir, 0755 } };
+      for (int i = 0; i < G_N_ELEMENTS (subdirs); i++)
+        {
+          if (mkdirat (AT_FDCWD, subdirs[i].path, subdirs[i].mode) < 0 && errno != EEXIST)
+            return glnx_throw_errno_prefix (error, "Failed to create dir %s", subdirs[i].path);
+        }
+
+      g_autofree char *ovl_options
+          = g_strdup_printf ("lowerdir=%s,upperdir=%s,workdir=%s", lowerdir, upperdir, workdir);
+      if (mount ("overlay", target_etc, "overlay", MS_SILENT, ovl_options) < 0)
+        return glnx_throw_errno_prefix (error, "failed to mount persistent etc overlayfs");
     }
   else
     {
