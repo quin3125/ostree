@@ -5,7 +5,7 @@ TOP=$(git rev-parse --show-toplevel)
 GITREV=$(git rev-parse HEAD)
 gitdescribe=$(git describe --always --tags --match 'v2???.*' $GITREV)
 version=$(echo "$gitdescribe" | sed -e 's,-,\.,g' -e 's,^v,,')
-name=ostree
+name=libostree
 PKG_VER="${name}-${version}"
 
 TARFILE=${PKG_VER}.tar
