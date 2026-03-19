@@ -1,5 +1,5 @@
 srpm:
-	dnf install -y git
+	dnf install -y git python3-jsonschema
 	# similar to https://github.com/actions/checkout/issues/760, but for COPR
 	git config --global --add safe.directory '*'
 	ci/make-git-snapshot.sh
